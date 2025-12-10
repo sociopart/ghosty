@@ -1,0 +1,18 @@
+.landing-gradient {
+    background-image: linear-gradient(167.95deg, #60435F 0%, #1A151B 100%);
+  }
+
+._header {
+  display: flex;
+  justify-content: center;
+  background-color: #EA5247;
+  width: 100%;
+
+  ._tag {
+      font-size: 28px;
+      font-weight: 700;
+      color: #FDFBF9;
+      padding-top: 4px;
+      padding-bottom: 4px;
+  }
+}
