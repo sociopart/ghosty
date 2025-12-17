@@ -1,33 +1,61 @@
 import { useState } from 'react';
-import { ChevronDown, ChevronUp, MessageCircle, Trash2 } from 'react-feather';
+import { MessageCircle, Trash2, ChevronDown, ChevronUp } from 'react-feather';
 
-const Comment = ({ name, avatar, text, nestedComments }) => {
+const Comment = ({ name, avatar, text, time = "1 час назад", nestedComments = [], depth = 0 }) => {
+  const [isOpen, setIsOpen] = useState(true);
+  const hasNested = nestedComments.length > 0;
+
   return (
-    <div className="flex mt-4">
-      <img
-        className="w-10 h-10 rounded-full mr-5"
-        src={avatar}
-        alt={`${name}'s profile picture`}
-      />
-      <div className="flex-1">
-        <div className="flex items-center justify-start">
-          <h3 className="text-sm font-medium">{name}</h3>
-          <span className="ml-5 text-xs text-gray-500">1 hour ago</span>
+    <div className={`flex gap-3 ${depth > 0 ? 'ml-8 md:ml-12' : ''}`}>
+      <div className="avatar flex-shrink-0">
+        <div className="w-10 h-10 rounded-full">
+          <img src={avatar} alt={`${name}'s avatar`} />
         </div>
-        <p className="text-base mt-1">{text}</p>
-        {nestedComments &&
-          nestedComments.map((comment) => (
-            <div key={comment.id} className="pl-10">
-              <Comment {...comment} />
-            </div>
-          ))}
+      </div>
+
+      <div className="flex-1">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-semibold text-sm">{name}</span>
+          <span className="text-xs text-base-content/60">{time}</span>
+        </div>
+
+        <p className="mt-1 text-base-content">{text}</p>
+
+        <div className="flex items-center gap-4 mt-2">
+          <button className="text-sm flex items-center gap-1 hover:text-primary transition">
+            <MessageCircle size={16} />
+            Ответить
+          </button>
+          <button className="text-sm flex items-center gap-1 hover:text-error transition">
+            <Trash2 size={16} />
+            Удалить
+          </button>
+
+          {hasNested && (
+            <button
+              onClick={() => setIsOpen(!isOpen)}
+              className="ml-auto text-sm flex items-center gap-1 hover:text-primary transition"
+            >
+              {isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+              {nestedComments.length} {nestedComments.length === 1 ? 'ответ' : 'ответа'}
+            </button>
+          )}
+        </div>
+
+        {hasNested && isOpen && (
+          <div className="mt-4">
+            {nestedComments.map((nested) => (
+              <Comment key={nested.id} {...nested} depth={depth + 1} />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
 };
 
 const Comments = () => {
-  const comments = [
+  const [comments] = useState([
     {
       id: 1,
       name: "Jane Smith",
@@ -54,14 +82,23 @@ const Comments = () => {
       avatar: "https://i.pravatar.cc/150?img=4",
       text: "Suspendisse a dolor orci. Integer euismod sapien vel massa malesuada malesuada.",
     },
-  ];
+  ]);
 
   return (
-    <div className="text-white px-4 py-3 mt-4">
-      <h2 className="text-lg font-bold mb-4 text-usualWhite">Комментарии</h2>
-      {comments.map((comment) => (
-        <Comment key={comment.id} {...comment} />
-      ))}
+    <div className="mt-6">
+      <h2 className="text-xl font-bold mb-4">Комментарии ({comments.length})</h2>
+
+      <div className="space-y-6">
+        {comments.map((comment) => (
+          <Comment key={comment.id} {...comment} />
+        ))}
+      </div>
+
+      {comments.length === 0 && (
+        <p className="text-center text-base-content/60 py-8">
+          Пока нет комментариев. Будьте первым!
+        </p>
+      )}
     </div>
   );
 };

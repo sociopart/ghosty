@@ -2,8 +2,6 @@ import RegisterForm from "../components/forms/RegisterForm";
 import LoginForm from "../components/forms/LoginForm";
 import UserInfoForm from "../components/forms/UserInfoForm";
 import './../../src/public/css/tailwind.css';
-import './../assets/css/custom.css';
-import './../assets/css/pages/sign_in.css'
 import React from "react";
 import Cookies from 'js-cookie';
 import axios from 'axios';

@@ -5,19 +5,23 @@ import Dock from "../components/Dock";
 import { useQuery, useSubscription } from "@apollo/client";
 import { GET_POSTS_QUERY } from "../callbacks/queries/getPosts.query";
 import { POST_CREATED_SUBSCRIPTION } from "../callbacks/subscriptions/postCreated.watch";
-import { client, accessToken } from "../config/variables";
+import { accessToken } from "../config/variables";
 import { useNavigate } from "react-router-dom";
-
-
 
 const PostsList = ({ posts }) => {
   const navigate = useNavigate();
+
   const handleEditPost = (postId) => {
     navigate(`/edit-post/${postId}`);
   };
-  return posts.map((post) => (
-    <div className="mt-8 md:mt-10 lg:mt-12 xl:mt-16" key={post.id}>
-      {post != null && (
+
+  return posts.map((post, index) => (
+    <div
+      key={post.id}
+      className="mt-8 md:mt-10 lg:mt-12 xl:mt-16 opacity-0 animate-fade-slide"
+      style={{ animationDelay: `${index * 100}ms` }}
+    >
+      {post && (
         <Post
           userProfile=""
           postContent={post.body}
@@ -36,47 +40,55 @@ export const FeedPageComponent = () => {
   });
 
   const [posts, setPosts] = useState([]);
-  
 
   useEffect(() => {
-    if (data && data.allPosts) {
+    if (data?.allPosts) {
       setPosts(data.allPosts);
     }
   }, [data]);
 
-  // Should be fixed to null = false (in backend). But works
   useEffect(() => {
     const unsubscribe = subscribeToMore({
       document: POST_CREATED_SUBSCRIPTION,
       updateQuery: (prev, { subscriptionData }) => {
-        if (subscriptionData.data.postCreated == null) return prev;
-
+        if (!subscriptionData.data?.postCreated) return prev;
+        const newPost = subscriptionData.data.postCreated;
         return {
-          allPosts: [subscriptionData.data.postCreated].concat([prev]),
+          allPosts: [newPost, ...prev.allPosts],
         };
       },
     });
-
     return () => unsubscribe();
   }, [subscribeToMore]);
 
-
   if (loading) {
-    return <div>Loading...</div>;
+    return (
+      <div className="flex justify-center items-center min-h-screen">
+        <span className="loading loading-spinner loading-lg"></span>
+      </div>
+    );
   }
 
   if (error) {
-    return <div>Error: {error.message}</div>;
+    return (
+      <div className="alert alert-error shadow-lg max-w-md mx-auto mt-8">
+        <span>{error.message}</span>
+      </div>
+    );
   }
 
   return (
-    <div className="h-screen bg-usualWhite">
+    <div className="min-h-screen bg-base-100">
       <Header title="Новости" />
-      <div className="flex flex-col h-screen">
-        <div className="flex-none"></div>
-        <div className="flex-1 py-2 sm:py-8 md:py-6 lg:py-8 xl:py-12 bg-usualWhite mt-8">
-          {posts != null && (
+      <div className="pb-20 md:pb-0"> {/* отступ под Dock на мобильных */}
+        <div className="container max-w-4xl mx-auto px-4 py-8">
+          {posts.length > 0 ? (
             <PostsList posts={posts} />
+          ) : (
+            <div className="text-center py-20 text-base-content/60">
+              <p className="text-2xl">Пока нет записей</p>
+              <p>Будьте первым!</p>
+            </div>
           )}
         </div>
       </div>
