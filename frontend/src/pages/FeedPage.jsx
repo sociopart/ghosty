@@ -101,7 +101,7 @@ export const FeedPageComponent = () => {
 
       <div className={`pb-20 md:pb-0 ${hasNew ? "pt-20" : ""}`}>
         <div className="container max-w-4xl mx-auto px-4 py-8">
-          {/* Скрытые новые посты — рендерятся, но не занимают место */}
+          {/* Скрытые новые посты */}
           <div className="h-0 overflow-hidden visibility-hidden">
             <PostsList posts={hiddenPosts} />
           </div>

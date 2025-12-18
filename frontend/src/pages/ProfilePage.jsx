@@ -1,16 +1,17 @@
 import React from 'react';
 import { useQuery, useMutation } from '@apollo/client';
+import { useNavigate, useParams } from 'react-router-dom';
 import { GET_USER_QUERY } from '../callbacks/queries/GetUser.query';
 import { GET_USER_BY_ID_QUERY } from '../callbacks/queries/getUserById.query';
 import { CREATE_ROOM_MUTATION } from '../callbacks/mutations/createRoom.mutation.js';
 import Header from '../components/Header';
 import Dock from '../components/Dock';
-import { MessageCircle, Users, UserPlus } from 'react-feather';
-import { useParams } from 'react-router-dom';
+import { MessageCircle } from 'react-feather';
 import { backendUrl } from "../config/variables";
 
 const ProfilePage = () => {
   const { id } = useParams();
+  const navigate = useNavigate();
 
   const query = id ? GET_USER_BY_ID_QUERY : GET_USER_QUERY;
   const variables = id ? { userId: Number(id) } : {};
@@ -50,11 +51,10 @@ const ProfilePage = () => {
 
   const handleMessage = async () => {
     try {
-      await createRoom({ variables: { secondMember: Number(id) } });
-      // добавить navigate(`/im/${roomId}`) после получения ID комнаты
-      console.log("Чат создан");
+      const { data } = await createRoom({ variables: { secondMember: Number(id) } });
+      navigate(`/im`);
     } catch (err) {
-      console.error(err);
+      console.error('Ошибка создания комнаты:', err);
     }
   };
 

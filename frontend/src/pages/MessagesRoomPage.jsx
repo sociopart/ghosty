@@ -9,35 +9,73 @@ import { CREATE_MSG_MUTATION } from "../callbacks/mutations/createMessage.mutati
 import { SUBSCRIPTION_ADD_MESSAGE_TO_ROOM } from "../callbacks/subscriptions/addMessageToRoom.watch";
 import { GET_USER_QUERY } from "../callbacks/queries/GetUser.query";
 
+const QUEUE_KEY_PREFIX = 'pendingMessages_';
+
 export const MessagesRoomPage = () => {
   const { id } = useParams();
   const roomId = parseInt(id);
+  const queueKey = QUEUE_KEY_PREFIX + roomId;
 
   const messagesEndRef = useRef(null);
 
   const { loading: userLoading, data: userData } = useQuery(GET_USER_QUERY);
-  const { loading, error, data, subscribeToMore } = useQuery(GET_MSG_FOR_ROOM, {
-    variables: { roomId }
+  const { loading, error, data, subscribeToMore, refetch } = useQuery(GET_MSG_FOR_ROOM, {
+    variables: { roomId },
+    fetchPolicy: "cache-and-network" // всегда проверяем сервер
   });
 
   const [messageInput, setMessageInput] = useState("");
   const [messages, setMessages] = useState([]);
+  const [pendingMessages, setPendingMessages] = useState([]);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [showOfflineModal, setShowOfflineModal] = useState(false);
 
-  const [createMessage] = useMutation(CREATE_MSG_MUTATION);
+  const [createMessage, { loading: sending }] = useMutation(CREATE_MSG_MUTATION, {
+    onCompleted: () => {
+      refetch();
+    }
+  });
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
+  // Сеть
+  useEffect(() => {
+    const goOnline = () => setIsOnline(true);
+    const goOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', goOnline);
+    window.addEventListener('offline', goOffline);
+
+    return () => {
+      window.removeEventListener('online', goOnline);
+      window.removeEventListener('offline', goOffline);
+    };
+  }, []);
+
+  // Реальные сообщения из GraphQL
   useEffect(() => {
     if (data?.messagesForRoom) {
       setMessages(data.messagesForRoom);
-      scrollToBottom();
     }
   }, [data]);
 
-  useEffect(() => scrollToBottom(), [messages]);
+  // Загрузка pending из localStorage (оффлайн)
+  useEffect(() => {
+    if (!userData?.currentUser) return;
+    const stored = JSON.parse(localStorage.getItem(queueKey) || '[]');
+    setPendingMessages(stored.map(entry => ({
+      tempId: entry.tempId,
+      id: entry.tempId,
+      body: entry.body,
+      user: userData.currentUser
+    })));
+  }, [userData, queueKey]);
 
+  useEffect(() => scrollToBottom(), [messages, pendingMessages]);
+
+  // Подписка на новые сообщения
   useEffect(() => {
     const unsubscribe = subscribeToMore({
       document: SUBSCRIPTION_ADD_MESSAGE_TO_ROOM,
@@ -53,15 +91,72 @@ export const MessagesRoomPage = () => {
     return () => unsubscribe();
   }, [subscribeToMore, roomId]);
 
+  // Синхронизация оффлайн-очереди
+  useEffect(() => {
+    if (!isOnline) return;
+
+    const syncQueue = async () => {
+      const pending = JSON.parse(localStorage.getItem(queueKey) || '[]');
+      if (pending.length === 0) return;
+
+      for (const entry of pending) {
+        try {
+          await createMessage({
+            variables: { roomId, body: entry.body }
+          });
+          const newPending = pending.filter(p => p.tempId !== entry.tempId);
+          localStorage.setItem(queueKey, JSON.stringify(newPending));
+          setPendingMessages(prev => prev.filter(m => m.tempId !== entry.tempId));
+        } catch (err) {
+          console.error('Sync failed:', err);
+          break;
+        }
+      }
+      refetch();
+    };
+
+    syncQueue();
+  }, [isOnline, createMessage, roomId, queueKey, refetch]);
+
+  // Оптимистическое добавление только для оффлайн
+  const addOptimisticMessage = (body) => {
+    const tempId = 'temp-' + Date.now();
+    setPendingMessages(prev => [...prev, {
+      tempId,
+      id: tempId,
+      body,
+      user: userData.currentUser
+    }]);
+    return tempId;
+  };
+
+  const enqueueMessage = (body, tempId) => {
+    const pending = JSON.parse(localStorage.getItem(queueKey) || '[]');
+    pending.push({ tempId, body });
+    localStorage.setItem(queueKey, JSON.stringify(pending));
+  };
+
   const handleSendMessage = async () => {
     if (!messageInput.trim()) return;
-    try {
-      await createMessage({
-        variables: { roomId, body: messageInput }
-      });
-      setMessageInput("");
-    } catch (err) {
-      console.error(err);
+    const body = messageInput.trim();
+    setMessageInput("");
+
+    if (isOnline) {
+      try {
+        await createMessage({
+          variables: { roomId, body }
+        });
+        // Сразу обновляем список сообщений с сервера
+        refetch();
+      } catch (err) {
+        console.error('Send failed:', err);
+        const tempId = addOptimisticMessage(body);
+        enqueueMessage(body, tempId);
+      }
+    } else {
+      const tempId = addOptimisticMessage(body);
+      enqueueMessage(body, tempId);
+      setShowOfflineModal(true);
     }
   };
 
@@ -89,6 +184,7 @@ export const MessagesRoomPage = () => {
   }
 
   const currentUserId = userData.currentUser.id;
+  const allMessages = [...messages, ...pendingMessages];
 
   return (
     <div className="flex flex-col h-screen bg-base-100 relative">
@@ -106,9 +202,9 @@ export const MessagesRoomPage = () => {
         </div>
       </div>
 
-      {/* Сообщения — с отступом снизу под фиксированный инпут + Dock */}
+      {/* Сообщения */}
       <div className="flex-1 overflow-y-auto px-4 py-6 pb-24 space-y-4">
-        {messages.map((message) => {
+        {allMessages.map((message) => {
           const isMine = message.user.id === currentUserId;
           const avatarUrl = message.user.avatarUrl
             ? `${backendUrl}/${message.user.avatarUrl}`
@@ -127,9 +223,7 @@ export const MessagesRoomPage = () => {
 
               <div
                 className={`max-w-xs md:max-w-md px-4 py-2 rounded-2xl shadow-sm ${
-                  isMine
-                    ? "bg-primary text-base-content"
-                    : "bg-base-300 text-base-content"
+                  isMine ? "bg-primary text-base-content" : "bg-base-300 text-base-content"
                 }`}
               >
                 <p className="break-words">{message.body}</p>
@@ -140,7 +234,7 @@ export const MessagesRoomPage = () => {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Фиксированный блок ввода — над Dock */}
+      {/* Инпут */}
       <div className="fixed bottom-16 left-0 right-0 bg-base-200 border-t border-base-300 p-4 z-20">
         <div className="max-w-4xl mx-auto flex gap-2">
           <input
@@ -150,18 +244,37 @@ export const MessagesRoomPage = () => {
             value={messageInput}
             onChange={(e) => setMessageInput(e.target.value)}
             onKeyPress={handleKeyPress}
+            disabled={sending}
           />
           <button
             onClick={handleSendMessage}
-            disabled={!messageInput.trim()}
+            disabled={!messageInput.trim() || sending}
             className="btn btn-primary btn-circle text-base-100"
           >
-            <Send size={20} />
+            {sending ? <span className="loading loading-spinner loading-xs"></span> : <Send size={20} />}
           </button>
         </div>
       </div>
 
       <Dock />
+
+      {/* Оффлайн модалка */}
+      <dialog className="modal" open={showOfflineModal}>
+        <div className="modal-box">
+          <h3 className="font-bold text-lg">Сообщение сохранено</h3>
+          <p className="py-4">
+            Нет интернета. Сообщение будет отправлено автоматически при восстановлении связи.
+          </p>
+          <div className="modal-action">
+            <button className="btn btn-primary" onClick={() => setShowOfflineModal(false)}>
+              OK
+            </button>
+          </div>
+        </div>
+        <form method="dialog" className="modal-backdrop">
+          <button onClick={() => setShowOfflineModal(false)}>close</button>
+        </form>
+      </dialog>
     </div>
   );
 };

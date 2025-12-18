@@ -3,6 +3,8 @@ import { Heart, MessageCircle, Share2, Edit2 } from "react-feather";
 import { backendUrl } from "../config/variables";
 import Comments from "./Comments";
 
+import avatarPlaceholder from "./../assets/images/avatar.png";
+
 const Post = ({ userProfile, postContent, postTime, postEmbedded, onEditPost }) => {
   const [likes, setLikes] = useState(0);
   const [newComment, setNewComment] = useState("");
@@ -25,7 +27,7 @@ const Post = ({ userProfile, postContent, postTime, postEmbedded, onEditPost }) 
           <div className="flex items-center gap-3">
             <div className="avatar">
               <div className="w-12 rounded-full">
-                <img src={userProfile} alt="avatar" />
+                <img src={avatarPlaceholder} alt="avatar" />
               </div>
             </div>
             <div>

@@ -1,14 +1,71 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useMutation } from '@apollo/client';
 import { Save, X, Image as ImageIcon } from "react-feather";
 import { CREATE_POST_MUTATION } from '../../callbacks/mutations/createPost.mutation.js';
 import { useDropzone } from 'react-dropzone';
 
+const QUEUE_KEY = 'pendingPosts';
+
 const NewPostForm = () => {
   const [text, setText] = useState('');
-  const [files, setFiles] = useState([]); // массив файлов с превью
+  const [files, setFiles] = useState([]);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [showOfflineModal, setShowOfflineModal] = useState(false);
 
   const [createPost, { loading }] = useMutation(CREATE_POST_MUTATION);
+
+  // Отслеживание статуса сети
+  useEffect(() => {
+    const goOnline = () => setIsOnline(true);
+    const goOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', goOnline);
+    window.addEventListener('offline', goOffline);
+
+    return () => {
+      window.removeEventListener('online', goOnline);
+      window.removeEventListener('offline', goOffline);
+    };
+  }, []);
+
+  // Синхронизация очереди при восстановлении соединения
+  useEffect(() => {
+    if (!isOnline) return;
+
+    const syncQueue = async () => {
+      let pending = JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]');
+      if (pending.length === 0) return;
+
+      for (let i = 0; i < pending.length; i++) {
+        const entry = pending[i];
+        try {
+          // Восстановление File объектов из base64
+          const restoredFiles = await Promise.all(
+            entry.fileBlobs.map(async ({ name, type, base64 }) => {
+              const blob = await fetch(base64).then(r => r.blob());
+              return new File([blob], name, { type });
+            })
+          );
+
+          await createPost({
+            variables: {
+              body: entry.text,
+              files: restoredFiles
+            }
+          });
+
+          // Удаление успешно отправленного элемента
+          pending = pending.filter(p => p.id !== entry.id);
+          localStorage.setItem(QUEUE_KEY, JSON.stringify(pending));
+        } catch (err) {
+          console.error('Sync failed for post:', entry.id, err);
+          break;
+        }
+      }
+    };
+
+    syncQueue();
+  }, [isOnline, createPost]);
 
   const onDrop = useCallback((acceptedFiles) => {
     const newFiles = acceptedFiles.map(file => Object.assign(file, {
@@ -23,27 +80,67 @@ const NewPostForm = () => {
     multiple: true
   });
 
+  // Удаление файла из превью и освобождение памяти
   const removeFile = (index) => {
     setFiles(prev => prev.filter((_, i) => i !== index));
-    // Освобождаем память от objectURL
     URL.revokeObjectURL(files[index].preview);
+  };
+
+  // Сохранение поста в очередь localStorage
+  const enqueuePost = (text, files) => {
+    const pending = JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]');
+    
+    const entry = {
+      id: Date.now() + Math.random(),
+      text,
+      fileBlobs: files.map(file => ({
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        base64: ''
+      }))
+    };
+
+    const promises = files.map(file => 
+      new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.readAsDataURL(file);
+      })
+    );
+
+    Promise.all(promises).then(base64Array => {
+      entry.fileBlobs = entry.fileBlobs.map((meta, i) => ({
+        ...meta,
+        base64: base64Array[i]
+      }));
+      pending.push(entry);
+      localStorage.setItem(QUEUE_KEY, JSON.stringify(pending));
+    });
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!text.trim() && files.length === 0) return;
 
-    try {
-      await createPost({
-        variables: {
-          body: text,
-          files: files // Apollo сам обработает FileList/File через multipart
-        }
-      });
+    if (isOnline) {
+      try {
+        await createPost({
+          variables: { body: text, files }
+        });
+        setText('');
+        setFiles([]);
+        files.forEach(f => URL.revokeObjectURL(f.preview));
+      } catch (err) {
+        console.error('Online submit failed:', err);
+        enqueuePost(text, files);
+      }
+    } else {
+      enqueuePost(text, files);
       setText('');
       setFiles([]);
-    } catch (err) {
-      console.error(err);
+      files.forEach(f => URL.revokeObjectURL(f.preview));
+      setShowOfflineModal(true);
     }
   };
 
@@ -51,7 +148,6 @@ const NewPostForm = () => {
     <div className="bg-base-100 px-4 py-8">
       <div className="card max-w-2xl mx-auto bg-base-200 shadow-xl">
         <form onSubmit={handleSubmit} className="card-body mt-5 gap-6">
-          {/* Текстовое поле */}
           <textarea
             className="textarea textarea-bordered textarea-lg w-full h-32"
             placeholder="Что у вас нового?"
@@ -60,7 +156,6 @@ const NewPostForm = () => {
             required={files.length === 0}
           />
 
-          {/* Превью изображений */}
           {files.length > 0 && (
             <div className="grid grid-cols-3 md:grid-cols-4 gap-3">
               {files.map((file, i) => (
@@ -69,7 +164,7 @@ const NewPostForm = () => {
                     src={file.preview}
                     alt="preview"
                     className="rounded-lg object-cover w-full h-32"
-                    onLoad={() => URL.revokeObjectURL(file.preview)} // чистим после загрузки
+                    onLoad={() => URL.revokeObjectURL(file.preview)}
                   />
                   <button
                     type="button"
@@ -83,7 +178,6 @@ const NewPostForm = () => {
             </div>
           )}
 
-          {/* Dropzone */}
           <div
             {...getRootProps()}
             className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition
@@ -101,7 +195,6 @@ const NewPostForm = () => {
             </p>
           </div>
 
-          {/* Кнопка отправки */}
           <div className="card-actions justify-center">
             <button
               type="submit"
@@ -120,6 +213,21 @@ const NewPostForm = () => {
           </div>
         </form>
       </div>
+
+      <dialog className="modal" open={showOfflineModal}>
+        <div className="modal-box">
+          <h3 className="font-bold text-lg">Пост сохранён локально</h3>
+          <p className="py-4">Нет интернета. Ваш пост будет автоматически отправлен, как только соединение восстановится.</p>
+          <div className="modal-action">
+            <button className="btn btn-primary" onClick={() => setShowOfflineModal(false)}>
+              OK
+            </button>
+          </div>
+        </div>
+        <form method="dialog" className="modal-backdrop">
+          <button onClick={() => setShowOfflineModal(false)}>close</button>
+        </form>
+      </dialog>
     </div>
   );
 };
