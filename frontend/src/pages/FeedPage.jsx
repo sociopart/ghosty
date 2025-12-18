@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import Header from "../components/Header";
 import Post from "../components/Post";
 import Dock from "../components/Dock";
-import { useQuery, useSubscription } from "@apollo/client";
+import { useQuery } from "@apollo/client";
 import { GET_POSTS_QUERY } from "../callbacks/queries/getPosts.query";
 import { POST_CREATED_SUBSCRIPTION } from "../callbacks/subscriptions/postCreated.watch";
 import { accessToken } from "../config/variables";
@@ -18,18 +18,16 @@ const PostsList = ({ posts }) => {
   return posts.map((post, index) => (
     <div
       key={post.id}
-      className="mt-8 md:mt-10 lg:mt-12 xl:mt-16 opacity-0 animate-fade-slide"
+      className="mt-8 md:mt-10 lg:mt-12 xl:mt-16 animate-fade-slide"
       style={{ animationDelay: `${index * 100}ms` }}
     >
-      {post && (
-        <Post
-          userProfile=""
-          postContent={post.body}
-          postTime={post.createdAt}
-          postEmbedded={post.imageUrls.map((image) => image.url)}
-          onEditPost={() => handleEditPost(post.id)}
-        />
-      )}
+      <Post
+        userProfile=""
+        postContent={post.body}
+        postTime={post.createdAt}
+        postEmbedded={post.imageUrls.map((image) => image.url)}
+        onEditPost={() => handleEditPost(post.id)}
+      />
     </div>
   ));
 };
@@ -39,11 +37,12 @@ export const FeedPageComponent = () => {
     variables: { accessToken },
   });
 
-  const [posts, setPosts] = useState([]);
+  const [visiblePosts, setVisiblePosts] = useState([]);
+  const [hiddenPosts, setHiddenPosts] = useState([]); // новые, скрытые
 
   useEffect(() => {
     if (data?.allPosts) {
-      setPosts(data.allPosts);
+      setVisiblePosts(data.allPosts);
     }
   }, [data]);
 
@@ -53,13 +52,22 @@ export const FeedPageComponent = () => {
       updateQuery: (prev, { subscriptionData }) => {
         if (!subscriptionData.data?.postCreated) return prev;
         const newPost = subscriptionData.data.postCreated;
-        return {
-          allPosts: [newPost, ...prev.allPosts],
-        };
+
+        setHiddenPosts((prev) => [newPost, ...prev]);
+
+        return prev;
       },
     });
+
     return () => unsubscribe();
   }, [subscribeToMore]);
+
+  const showNewPosts = () => {
+    if (hiddenPosts.length > 0) {
+      setVisiblePosts((prev) => [...hiddenPosts.reverse(), ...prev]);
+      setHiddenPosts([]);
+    }
+  };
 
   if (loading) {
     return (
@@ -77,13 +85,30 @@ export const FeedPageComponent = () => {
     );
   }
 
+  const hasNew = hiddenPosts.length > 0;
+
   return (
-    <div className="min-h-screen bg-base-100">
+    <div className="min-h-screen bg-base-100 relative">
       <Header title="Новости" />
-      <div className="pb-20 md:pb-0"> {/* отступ под Dock на мобильных */}
+
+      {hasNew && (
+        <div className="fixed top-16 left-0 right-0 z-40 px-4 pt-2">
+          <button onClick={showNewPosts} className="btn btn-primary w-full shadow-lg">
+            {hiddenPosts.length} {hiddenPosts.length === 1 ? 'новый пост' : 'новых постов'} — показать
+          </button>
+        </div>
+      )}
+
+      <div className={`pb-20 md:pb-0 ${hasNew ? "pt-20" : ""}`}>
         <div className="container max-w-4xl mx-auto px-4 py-8">
-          {posts.length > 0 ? (
-            <PostsList posts={posts} />
+          {/* Скрытые новые посты — рендерятся, но не занимают место */}
+          <div className="h-0 overflow-hidden visibility-hidden">
+            <PostsList posts={hiddenPosts} />
+          </div>
+
+          {/* Видимые посты */}
+          {visiblePosts.length > 0 ? (
+            <PostsList posts={visiblePosts} />
           ) : (
             <div className="text-center py-20 text-base-content/60">
               <p className="text-2xl">Пока нет записей</p>
@@ -92,6 +117,7 @@ export const FeedPageComponent = () => {
           )}
         </div>
       </div>
+
       <Dock />
     </div>
   );
